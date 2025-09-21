@@ -1,0 +1,47 @@
+import os
+import requests
+from urllib.parse import urlparse
+import uuid
+
+def get_image_filename(url):
+    """Extracts a filename from the URL or generates a UUID-based one if not found."""
+    path = urlparse(url).path
+    filename = os.path.basename(path)
+    if not filename or '.' not in filename:
+        # Generate a filename with .jpg extension if none found
+        filename = f"image_{uuid.uuid4().hex}.jpg"
+    return filename
+
+def fetch_and_save_image(url, save_dir="Fetched_Images"):
+    """Fetches an image from the given URL and saves it to the specified directory."""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()  # Raise error for bad HTTP responses
+        # Check Content-Type header to ensure it's an image
+        if not response.headers.get("Content-Type", "").startswith("image"):
+            print("The provided URL does not contain an image.")
+            return
+
+        os.makedirs(save_dir, exist_ok=True)
+        filename = get_image_filename(url)
+        filepath = os.path.join(save_dir, filename)
+
+        with open(filepath, "wb") as f:
+            f.write(response.content)
+        print(f"Image successfully saved as: {filepath}")
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching image: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+def main():
+    print("Welcome to the Ubuntu Image Fetcher!")
+    url = input("Please enter the URL of the image to fetch: ").strip()
+    if not url:
+        print("No URL provided. Exiting.")
+        return
+    fetch_and_save_image(url)
+
+if __name__ == "__main__":
+    main()
