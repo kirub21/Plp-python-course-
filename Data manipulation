@@ -1,0 +1,208 @@
+"""
+CORD-19 Data Explorer
+---------------------
+This script loads and explores the CORD-19 metadata.csv dataset,
+performs data cleaning and basic analysis, creates visualizations,
+and provides a simple Streamlit application for interactive data exploration.
+
+Author: <your-name>
+Date: <date>
+"""
+
+# Part 1: Data Loading and Basic Exploration
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import streamlit as st
+from wordcloud import WordCloud, STOPWORDS
+import io
+
+# --- Streamlit Title and Description ---
+st.title("CORD-19 Data Explorer")
+st.write("""
+Simple exploration of COVID-19 research papers using the CORD-19 dataset (metadata.csv).
+You can interactively explore the data, view statistics, and see visualizations of research trends.
+""")
+
+# --- File uploader for Streamlit ---
+st.sidebar.header("Upload CORD-19 metadata.csv")
+uploaded_file = st.sidebar.file_uploader("Choose metadata.csv", type="csv")
+if uploaded_file:
+    # Load data into a pandas DataFrame
+    df = pd.read_csv(uploaded_file, low_memory=False)
+else:
+    st.info("Please upload the CORD-19 metadata.csv file to begin.")
+    st.stop()
+
+# --- Basic Data Exploration ---
+st.header("1. Data Loading and Basic Exploration")
+
+# Show first few rows
+st.subheader("First 5 Rows of the Data")
+st.write(df.head())
+
+# DataFrame dimensions
+st.write(f"**DataFrame shape:** {df.shape[0]} rows, {df.shape[1]} columns")
+
+# Data types
+st.subheader("Data Types")
+st.write(df.dtypes)
+
+# Missing values in key columns
+st.subheader("Missing Values (Top 15 columns)")
+st.write(df.isnull().sum().sort_values(ascending=False).head(15))
+
+# Basic statistics for numerical columns
+st.subheader("Basic Statistics (Numerical Columns)")
+st.write(df.describe())
+
+# --- Part 2: Data Cleaning and Preparation ---
+
+st.header("2. Data Cleaning and Preparation")
+
+# Identify columns with many missing values
+missing_perc = (df.isnull().sum() / len(df)) * 100
+many_missing = missing_perc[missing_perc > 60]
+st.write(f"Columns with >60% missing values: {list(many_missing.index)}")
+
+# Drop columns with >80% missing values (arbitrary threshold)
+drop_cols = missing_perc[missing_perc > 80].index
+df_clean = df.drop(columns=drop_cols)
+
+# Fill missing abstracts/titles with empty string
+for col in ['abstract', 'title']:
+    if col in df_clean.columns:
+        df_clean[col] = df_clean[col].fillna("")
+
+# Convert date columns to datetime
+for date_col in ['publish_time']:
+    if date_col in df_clean.columns:
+        df_clean[date_col] = pd.to_datetime(df_clean[date_col], errors='coerce')
+
+# Extract year from publication date
+df_clean['year'] = df_clean['publish_time'].dt.year
+
+# Create new column: abstract word count
+df_clean['abstract_word_count'] = df_clean['abstract'].apply(lambda x: len(str(x).split()))
+
+st.write("Cleaned data sample:")
+st.write(df_clean.head())
+
+# --- Part 3: Data Analysis and Visualization ---
+
+st.header("3. Data Analysis and Visualization")
+
+# Interactive year range slider
+min_year = int(df_clean['year'].min()) if df_clean['year'].notnull().any() else 2019
+max_year = int(df_clean['year'].max()) if df_clean['year'].notnull().any() else 2022
+year_range = st.slider("Select publication year range", min_value=min_year, max_value=max_year, value=(2020, 2021))
+
+# Filter by year range
+df_filtered = df_clean[df_clean['year'].between(year_range[0], year_range[1])]
+
+# -- Count papers by year --
+st.subheader("Number of Publications by Year")
+year_counts = df_filtered['year'].value_counts().sort_index()
+fig1, ax1 = plt.subplots()
+ax1.bar(year_counts.index.astype(str), year_counts.values, color='skyblue')
+ax1.set_xlabel("Year")
+ax1.set_ylabel("Number of Publications")
+ax1.set_title("Publications by Year")
+st.pyplot(fig1)
+
+# -- Top journals publishing COVID-19 research --
+st.subheader("Top 10 Journals by Publication Count")
+if 'journal' in df_filtered.columns:
+    top_journals = df_filtered['journal'].value_counts().head(10)
+    fig2, ax2 = plt.subplots()
+    sns.barplot(y=top_journals.index, x=top_journals.values, ax=ax2, palette='viridis')
+    ax2.set_xlabel("Number of Publications")
+    ax2.set_ylabel("Journal")
+    ax2.set_title("Top 10 Journals")
+    st.pyplot(fig2)
+    st.write(top_journals)
+else:
+    st.info("Journal column not found in data.")
+
+# -- Most frequent words in titles (simple word frequency) --
+st.subheader("Most Frequent Words in Titles (excluding stopwords)")
+from collections import Counter
+import re
+
+def get_word_freq(texts, stopwords=STOPWORDS, n=15):
+    words = []
+    for t in texts:
+        t = str(t).lower()
+        t = re.sub(r'[^a-z\s]', '', t)
+        for w in t.split():
+            if w not in stopwords and len(w) > 2:
+                words.append(w)
+    return Counter(words).most_common(n)
+
+title_words = get_word_freq(df_filtered['title'])
+words, counts = zip(*title_words)
+fig3, ax3 = plt.subplots()
+sns.barplot(x=list(counts), y=list(words), ax=ax3, palette='mako')
+ax3.set_title('Top Words in Paper Titles')
+ax3.set_xlabel('Frequency')
+ax3.set_ylabel('Word')
+st.pyplot(fig3)
+
+# -- Word Cloud of Paper Titles --
+st.subheader("Word Cloud of Paper Titles")
+title_text = " ".join(df_filtered['title'].dropna().astype(str).tolist())
+wordcloud = WordCloud(width=700, height=350, stopwords=STOPWORDS, background_color='white').generate(title_text)
+fig4, ax4 = plt.subplots(figsize=(10,5))
+ax4.imshow(wordcloud, interpolation='bilinear')
+ax4.axis('off')
+st.pyplot(fig4)
+
+# -- Distribution of paper counts by source --
+st.subheader("Distribution of Paper Counts by Source")
+if 'source_x' in df_filtered.columns:
+    source_counts = df_filtered['source_x'].value_counts()
+    fig5, ax5 = plt.subplots()
+    sns.barplot(y=source_counts.index[:10], x=source_counts.values[:10], ax=ax5, palette='cubehelix')
+    ax5.set_xlabel("Number of Papers")
+    ax5.set_ylabel("Source")
+    ax5.set_title("Top 10 Sources")
+    st.pyplot(fig5)
+    st.write(source_counts.head(10))
+else:
+    st.info("source_x column not found in data.")
+
+# --- Show a sample of the filtered data ---
+st.header("4. Data Sample (Filtered)")
+st.dataframe(df_filtered.head(20))
+
+# --- Part 5: Documentation and Reflection ---
+st.header("5. Documentation and Reflection")
+st.markdown("""
+**Process Overview:**
+- Loaded CORD-19 metadata, explored structure and missing values
+- Cleaned data by dropping columns with too many missing values and filling important text fields
+- Converted dates, extracted year, and added abstract word count
+- Analyzed publication trends over time, journal impact, and title word frequency
+
+**Findings:**
+- Publication counts peaked in 2020-2021
+- Certain journals and sources dominate COVID-19 research
+- Frequent title words reflect pandemic focus
+
+**Challenges:**
+- Handling missing and inconsistent data
+- Large file sizes can slow down loading/processing (start with a sample if needed)
+
+**Learning:**
+- Practical experience in data cleaning, analysis, and visualization
+- Built an interactive Streamlit dashboard
+
+**Tips:**
+- Use .head() and .info() frequently
+- Test each step incrementally
+- Consult documentation when unsure
+""")
+
+# End of script
